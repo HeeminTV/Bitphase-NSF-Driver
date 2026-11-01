@@ -46,7 +46,11 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 		"vrc7": CHIPID_VRC7
 	}
 	let a_chipsList = []; // only used to detect duplicated chips
-	let a_channelList = []; // channel stream buffers
+	let a_channelList = []; /* channel stream buffers
+	[
+	{ chipID: "0", channelID: "0", virtualID: "-1", stream: [] }
+	]
+	*/
 	for (const a_chip of btpModule.songs) { // per chips
 		const i_currentChipID = d_chipStringToID[a_chip.chipType];
 		if (i_currentChipID === undefined) throw new Error(`Chip "${a_chip.chipType}" is not supported by the NSF driver currently.`);
@@ -59,6 +63,20 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 			if (!a_currentPattern) throw new Error(`Cannot find pattern ID ${i_targetPatID}. This should be the bug of the app itself.`); // for whatever reason
 	
 			a_currentPattern.channels.forEach((a_currentChannel, i_currentChannelID) => {
+				// per channels
+				const { physicalPort: i_physicalChannelID, virtualPort: i_virtualChannelID } = getActualChannelIndexFromPatternChannelObjectID(i_currentChannelID, a_chip.virtualChannelMap);
+
+				// check if it has to create new channel object
+				if (
+					!a_channelList.some(item => 
+						item.chipID === i_currentChipID &&
+						item.channelID === i_physicalChannelID &&
+						item.virtualID === i_virtualChannelID
+					)
+				) {
+					a_channelList.push({ chipID: i_currentChipID, channelID: i_physicalChannelID, virtualID: i_virtualChannelID, stream: []});
+					console.log(a_channelList);
+				}
 				for (const a_currentRow of a_currentChannel.rows) {
 					// a_currentRow = A channels' row (linearly)
 				}
@@ -111,9 +129,9 @@ function getActualChannelIndexFromPatternChannelObjectID(flatIndex, virtualChann
 	let currentIndex = 0;
 
 	for (let p = 0; p < 64; p++) {
-		const extraVirtuals = virtualChannelMap[String(p)] || 0; // the amount of added virtual channel count (0 if none)
+		const extraVirtuals = virtualChannelMap[String(p)] || 1; // the amount of added virtual channel count (0 if none)
 		// the amount of channels a physical channel occupies (one for main + virtual)
-		const totalPortsForThisPhysical = 1 + extraVirtuals;
+		const totalPortsForThisPhysical = extraVirtuals;
 
 		if (flatIndex >= currentIndex && flatIndex < currentIndex + totalPortsForThisPhysical) {
 			const offset = flatIndex - currentIndex;
