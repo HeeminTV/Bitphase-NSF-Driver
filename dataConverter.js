@@ -34,11 +34,19 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 
 	// Parse the pattern **first**
 	// Generate linear abstract command stream per each channels
+	const CHIPID_NES = 0;
+	const CHIPID_AY = 1;
+	const CHIPID_MMC5 = 2;
+	const CHIPID_VRC7 = 3;
+
 	const d_chipStringToID = {
-		"nes": 0,
-		"ay": 1
+		"nes": CHIPID_NES,
+		"ay": CHIPID_AY,
+		"mmc5": CHIPID_MMC5,
+		"vrc7": CHIPID_VRC7
 	}
 	let a_chipsList = []; // only used to detect duplicated chips
+	let a_channelList = []; // channel stream buffers
 	for (const a_chip of btpModule.songs) { // per chips
 		const i_currentChipID = d_chipStringToID[a_chip.chipType];
 		if (i_currentChipID === undefined) throw new Error(`Chip "${a_chip.chipType}" is not supported by the NSF driver currently.`);
@@ -49,6 +57,12 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 		for (const i_targetPatID of btpModule.patternOrder) { // render linearly (compress later)
 			const a_currentPattern = a_chip.patterns.find(p => p.id === i_targetPatID);
 			if (!a_currentPattern) throw new Error(`Cannot find pattern ID ${i_targetPatID}. This should be the bug of the app itself.`); // for whatever reason
+	
+			a_currentPattern.channels.forEach((a_currentChannel, i_currentChannelID) => {
+				for (const a_currentRow of a_currentChannel.rows) {
+					// a_currentRow = A channels' row (linearly)
+				}
+			});
 		}
 	}
 	
@@ -84,10 +98,39 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 	return new Uint8Array(a_byteBuffer);
 }
 
+// ======================================================================================================
+
 const pushByte = (val)       => { a_byteObjList.push(val & 0xFF); i_currentAddress++; }
 const pushWord = (val)       => { a_byteObjList.push((val & 0xFF), ((val >> 8) & 0xFF)); i_currentAddress+=2; }
 const pushLabel= (labelname) => { a_byteObjList.push(labelname); i_currentAddress+=2; }
 const setLabel = (labelstr)  => { d_labelAddrTbl[labelstr] = i_currentAddress; }
+
+// ======================================================================================================
+
+function getActualChannelIndexFromPatternChannelObjectID(flatIndex, virtualChannelMap) {//, totalPhysicalPorts = 5) {
+	let currentIndex = 0;
+
+	for (let p = 0; p < 64; p++) {
+		const extraVirtuals = virtualChannelMap[String(p)] || 0; // the amount of added virtual channel count (0 if none)
+		// the amount of channels a physical channel occupies (one for main + virtual)
+		const totalPortsForThisPhysical = 1 + extraVirtuals;
+
+		if (flatIndex >= currentIndex && flatIndex < currentIndex + totalPortsForThisPhysical) {
+			const offset = flatIndex - currentIndex;
+
+			if (offset === 0) {
+				return { physicalPort: p, virtualPort: -1 };
+			} else {
+				return { physicalPort: p, virtualPort: offset - 1 };
+			}
+		}
+
+		currentIndex += totalPortsForThisPhysical;
+	}
+
+	// return null;
+	throw new Error(`Cannot find the effective channel ID of channel object ID ${flatIndex}.`);
+}
 
 // ======================================================================================================
 //
@@ -95,19 +138,16 @@ const setLabel = (labelstr)  => { d_labelAddrTbl[labelstr] = i_currentAddress; }
 //
 // ======================================================================================================
 
-const zlib = require('zlib');
-const path = require('path'); // really
-
 if (require.main === module) {
     const args = process.argv.slice(2);
     
     if (args.length != 3) {
-        console.log(`Usage: ${path.basename(process.argv[1])} <module.btp> <load address> <output.bin>`);
+        console.log(`Usage: ${require('path').basename(process.argv[1])} <module.btp> <load address> <output.bin>`);
         process.exit(1);
     }
 
     try {
-        fs.writeFileSync(args[2], convertBitphaseJsonToNSFBytecode(JSON.parse(zlib.gunzipSync(fs.readFileSync(args[0])).toString('utf8')), Number(args[1])));
+        fs.writeFileSync(args[2], convertBitphaseJsonToNSFBytecode(JSON.parse(require('zlib').gunzipSync(fs.readFileSync(args[0])).toString('utf8')), Number(args[1])));
         console.log(`Data output.`);
 		process.exit(0);
     } catch (err) {
