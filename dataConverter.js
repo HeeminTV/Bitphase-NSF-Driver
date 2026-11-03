@@ -35,7 +35,7 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 	if (i_loadAddress > 0xFFFF || i_loadAddress < 0x0000) throw new Error(`Load address must exist at 6502 memory range. Specified 0x${i_loadAddress.toString(16).toUpperCase()}.`);
 
 	// Parse the pattern **first**
-	// Generate linear abstract command stream per each channels
+	// Generate linear byte command stream per each channels (no compression)
 	const CHIPID_NES = 0;
 	const CHIPID_AY = 1;
 	const CHIPID_MMC5 = 2;
@@ -52,83 +52,145 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 	[
 	{ chipID: "0", channelID: "0", virtualID: "-1", 
 	  delayCount: "64",
-	  stream: [
-		[], [note, [effect], [effect] ], []
-	] 
+	  stream: [] 
 	}
 	]
 	*/
+	
+	/* Bytecode stream commands format
+	- $00    : Parsing terminate
+	- $01    : Note cut and terminate parsing
+	- $02    : Release and terminate parsing
+	- $03-$04: Reserved
+	- $05-$07: Virtual channel flag (switch to virtual channel parsing until it terminates)
+	- $08-$7F: Notes starting from C-1 and terminate parsing
+	- $80-$CF: Commands
+	- $D0-$DF: Volume column
+	- $E0-$FF: Quick default length
+	*/
+	
+	const CMD_TERMINATE = 0x00;
+	const CMD_NOTECUT = 0x01;
+	const CMD_RELEASE = 0x02;
+	// const CMD_ = 0x03; 				// reserved
+	// const CMD_ = 0x04; 				// reserved
+	const CMD_HANDLE_VCHAN = 0x05; 		// $05-$07
+	
+	const CMD_JUMP = 0x80;				// xx xx, x = jump location
+	const CMD_CALL = 0x81; 				// xx yy yy, x = commands to read, y = call pointer
+	const CMD_SET_INSTRUMENT = 0x82; 	// xx, x = instrument number
+	const CMD_SET_TABLE = 0x83; 		// xx xx, x = table number
+	const CMD_SET_DURATION = 0x84; 		// xx = duration
+	// const CMD_ = 0x85; 				// reserved
+	// const CMD_ = 0x86; 				// reserved
+	// const CMD_ = 0x87;				 // reserved
 
-	for (const a_chip of btpModule.songs) { // per chips
-		const i_currentChipID = d_chipStringToID[a_chip.chipType];
-		if (i_currentChipID === undefined) throw new Error(`Chip "${a_chip.chipType}" is not supported by the NSF driver currently.`);
-		if (a_chipsList.includes(i_currentChipID)) throw new Error(`Same chip cannot be used more than once. Tried to add one another "${a_chip.chipType}".`);
-		a_chipsList.push(i_currentChipID); // finally push the chip ID into the list
+	const CMD_EFF_SPEED = 0x88;
+	const CMD_EFF_TEMPO = 0x89;
+	
+	const CMD_VOLUME_COLUMN = 0xD0;		 // $D0-$DF
+	const CMD_QUICK_SET_DURATION = 0xE0; // $E0-$FF
+
+	for (const chip of btpModule.songs) { // per chips
+		const currentChipID = d_chipStringToID[chip.chipType];
+		if (currentChipID === undefined) throw new Error(`Chip "${chip.chipType}" is not supported by the NSF driver currently.`);
+		if (a_chipsList.includes(currentChipID)) throw new Error(`Same chip cannot be used more than once. Tried to add one another "${chip.chipType}".`);
+		a_chipsList.push(currentChipID); // finally push the chip ID into the list
 		
 		// loop through patterns
-		for (const i_targetPatID of btpModule.patternOrder) { // render linearly (compress later)
-			const a_currentPattern = a_chip.patterns.find(p => p.id === i_targetPatID);
-			if (!a_currentPattern) throw new Error(`Cannot find pattern ID ${i_targetPatID}. This should be the bug of the app itself.`); // for whatever reason
+		for (const targetPatID of btpModule.patternOrder) { // render linearly (compress later)
+			const a_currentPattern = chip.patterns.find(p => p.id === targetPatID);
+			if (!a_currentPattern) throw new Error(`Cannot find pattern ID ${targetPatID}. This should be the bug of the app itself.`); // for whatever reason
 	
-			a_currentPattern.channels.forEach((a_currentChannel, i_currentChannelID) => {
+			a_currentPattern.channels.forEach((channelFrame, currentChannelID) => {
 				// per channels
-				const { 
-					physicalPort: i_physicalChannelID,
-					virtualPort: i_virtualChannelID
-				} = getActualChannelIndexFromPatternChannelObjectID(i_currentChannelID, a_chip.virtualChannelMap);
+				
+				// get physical, virtual channel ID
+				let physicalChannelID;
+				let virtualChannelID;
+				{ // scope
+					let currentIndex = 0;
+					for (let p = 0; p < 64; p++) {
+						const totalPortsForThisPhysical = chip.virtualChannelMap[String(p)] || 1; // the amount of added virtual channel count (0 if none)
 
-				let o_channelBuf;
-				o_channelBuf = a_channelList.find(item => 
-					item.chipID === i_currentChipID &&
-					item.channelID === i_physicalChannelID &&
-					item.virtualID === i_virtualChannelID
-				);
-				// check if it has to create new channel object
-				if (!o_channelBuf) {
-					// intiaizlie channel
-					o_channelBuf = { 
-						chipID: i_currentChipID,
-						channelID: i_physicalChannelID,
-						virtualID: i_virtualChannelID,
+						if (currentChannelID >= currentIndex && currentChannelID < currentIndex + totalPortsForThisPhysical) {
+							const offset = currentChannelID - currentIndex;
 
-						delayCount: 0, // render temp
-						stream: []
-					};
-					a_channelList.push(o_channelBuf);
+							if (offset === 0) {
+								physicalChannelID = p; virtualChannelID = -1;
+								break;
+							} else {
+								physicalChannelID = p; virtualChannelID = offset -1;
+								break;
+							}
+						}
+						currentIndex += totalPortsForThisPhysical;
+					}
+					if (physicalChannelID === undefined || virtualChannelID === undefined) throw new Error(`Cannot find the effective channel ID of channel object ID ${currentChannelID}.`);
 				}
 
-				for (const a_currentRow of a_currentChannel.rows) {
-					// a_currentRow = A channels' row (linearly)
+				let chBuf = a_channelList.find(item => 
+					item.chipID === currentChipID &&
+					item.channelID === physicalChannelID &&
+					item.virtualID === virtualChannelID
+				);
+				// check if it has to create new channel object
+				if (!chBuf) {
+					// intiaizlie channel
+					chBuf = { 
+						chipID: currentChipID,
+						channelID: physicalChannelID,
+						virtualID: virtualChannelID,
+
+						// render temp
+						delayCount: 0,
+						lastDelayCount: -1,
+						lastInstrument: -1,
+						
+
+						stream: [] // command buffer
+					};
+					a_channelList.push(chBuf);
+				}
+
+				for (const chRow of channelFrame.rows) {
+					// chRow = A channels' row (linearly)
 					if(
-						a_currentRow.note.name == 0 &&
-						a_currentRow.note.octave == 0 &&
-						a_currentRow.instrument == 0 &&
-						a_currentRow.table == 0 &&
-						a_currentRow.volume == 0 &&
-						a_currentRow.effects.every(item => item === null)
+						chRow.note.name == 0 &&
+						chRow.note.octave == 0 &&
+						chRow.instrument == 0 &&
+						chRow.table == 0 &&
+						chRow.volume == 0 &&
+						chRow.effects.every(item => item === null)
 					) {
-						o_channelBuf.delayCount++; // empty row. increment delay Count
+						chBuf.delayCount++; // empty row. increment delay Count
 					} else {
 						// has something sensical
-						if (i_currentChipID==CHIPID_NES && i_physicalChannelID==0 && i_virtualChannelID == -1) console.log(o_channelBuf.delayCount);
-						o_channelBuf.delayCount = 0;
+						if (chBuf.delayCount != chBuf.lastDelayCount) { // differnt duration
+							chBuf.lastDelayCount = chBuf.delayCount; // update last delay count
+
+							if (chBuf.delayCount >= 32) {
+								let delayDec = chBuf.delayCount-32;
+								while (delayDec > 255) {
+									chBuf.stream.push(CMD_SET_DURATION, 255);
+									delayDec-=255;
+								}
+								chBuf.stream.push(CMD_SET_DURATION, delayDec);
+								
+								chBuf.stream.push(CMD_SET_DURATION, chBuf.delayCount);
+							} else {
+								chBuf.stream.push(CMD_QUICK_SET_DURATION+chBuf.delayCount);
+							}
+						}
+						chBuf.delayCount = 0;
+						
+						// note 1 octave 0 = OFF
+						// note 14 octave 0 = REL?
 					}
 				}
 			});
 		}
 	}
-	
-	/* Bytecode commands format
-	- $00    : Note cut and terminate parsing
-	- $01    : Release and terminate parsing
-	- $02-$03: Reserved
-	- $04    : Parsing terminate
-	- $05-$07: Virtual channel flag (switch to virtual channel parsing until it terminates)
-	- $08-$6F: Notes (partial) starting from C-1 and terminate parsing
-	- $70-$7F: Volume change
-	- $80-$DF: Commands
-	- $E0-$FF: Default length
-	*/
 	
 	i_currentAddress = i_loadAddress; // only used to track label
 	a_byteObjList = [];

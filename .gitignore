@@ -4,13 +4,21 @@
 
 ignore*
 *.nes
+*.NES
 *.nsf
+*.NSF
 *.nsf2
 *.exe
+*.EXE
 *.bin
+*.BIN
 *.mlb
 *.gz
+*.GZ
 *.btp
+*.BTP
+*.JSON
 test*
 *.bat
+*.BAT
 *.json
