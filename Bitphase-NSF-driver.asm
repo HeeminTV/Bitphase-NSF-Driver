@@ -50,9 +50,6 @@
 ;     Or like `bp_zp = $F8` and `bp_bss = $200` to map them in fixed area.
 ;
 ; ======================================================================================================
-
-BP_ENABLE_VCHANS = 1
-	; ^ Enable virtual channel support.
 	
 BP_UNOFFICIAL_INSTRUCTIONS = 0
 	; ^ Disabled by default for compatibility with old NSF players.
@@ -80,7 +77,7 @@ bp_zp_size = bp_zp_end-bp_zp
 ; ======================================================================================================
 
 enum bp_bss
-		bp_var_Enabled_Channels:		.dsb 1 ; ...DNT21 D = Enbale DPCM, N = Enable noise, T = Enable triangle, 2 = Enable pulse 2, 1 = Enable pulse 1
+		bp_var_Enabled_Channels:		.dsb 1 ; ...D NT21 D = Enbale DPCM, N = Enable noise, T = Enable triangle, 2 = Enable pulse 2, 1 = Enable pulse 1
 		bp_var_ch_ps_Period_MSB_Old:	.dsb BP_PULSE_COUNT
 		
 		bp_var_Base_Song_Ptr: 			.dsb 2

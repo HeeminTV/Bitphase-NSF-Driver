@@ -1,17 +1,19 @@
-/*======================================================================================================
-    Copyright 2026 Heemin
-    
-    Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
-    associated documentation files (the "Software"), to deal in the Software without restriction,
-    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
-    and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so.
-    
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
-    LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-    WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-======================================================================================================*/
+/*
+   ======================================================================================================
+   Copyright 2026 Heemin
+   
+   Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+   associated documentation files (the "Software"), to deal in the Software without restriction,
+   including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
+   and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so.
+   
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+   LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+   WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+   ======================================================================================================
+*/
 
 const fs = require('fs');
 
@@ -46,11 +48,17 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 		"vrc7": CHIPID_VRC7
 	}
 	let a_chipsList = []; // only used to detect duplicated chips
-	let a_channelList = []; /* channel stream buffers
+	let a_channelList = []; /* channel stream buffers and render status
 	[
-	{ chipID: "0", channelID: "0", virtualID: "-1", stream: [] }
+	{ chipID: "0", channelID: "0", virtualID: "-1", 
+	  delayCount: "64",
+	  stream: [
+		[], [note, [effect], [effect] ], []
+	] 
+	}
 	]
 	*/
+
 	for (const a_chip of btpModule.songs) { // per chips
 		const i_currentChipID = d_chipStringToID[a_chip.chipType];
 		if (i_currentChipID === undefined) throw new Error(`Chip "${a_chip.chipType}" is not supported by the NSF driver currently.`);
@@ -64,25 +72,63 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 	
 			a_currentPattern.channels.forEach((a_currentChannel, i_currentChannelID) => {
 				// per channels
-				const { physicalPort: i_physicalChannelID, virtualPort: i_virtualChannelID } = getActualChannelIndexFromPatternChannelObjectID(i_currentChannelID, a_chip.virtualChannelMap);
+				const { 
+					physicalPort: i_physicalChannelID,
+					virtualPort: i_virtualChannelID
+				} = getActualChannelIndexFromPatternChannelObjectID(i_currentChannelID, a_chip.virtualChannelMap);
 
+				let o_channelBuf;
+				o_channelBuf = a_channelList.find(item => 
+					item.chipID === i_currentChipID &&
+					item.channelID === i_physicalChannelID &&
+					item.virtualID === i_virtualChannelID
+				);
 				// check if it has to create new channel object
-				if (
-					!a_channelList.some(item => 
-						item.chipID === i_currentChipID &&
-						item.channelID === i_physicalChannelID &&
-						item.virtualID === i_virtualChannelID
-					)
-				) {
-					a_channelList.push({ chipID: i_currentChipID, channelID: i_physicalChannelID, virtualID: i_virtualChannelID, stream: []});
-					console.log(a_channelList);
+				if (!o_channelBuf) {
+					// intiaizlie channel
+					o_channelBuf = { 
+						chipID: i_currentChipID,
+						channelID: i_physicalChannelID,
+						virtualID: i_virtualChannelID,
+
+						delayCount: 0, // render temp
+						stream: []
+					};
+					a_channelList.push(o_channelBuf);
 				}
+
 				for (const a_currentRow of a_currentChannel.rows) {
 					// a_currentRow = A channels' row (linearly)
+					if(
+						a_currentRow.note.name == 0 &&
+						a_currentRow.note.octave == 0 &&
+						a_currentRow.instrument == 0 &&
+						a_currentRow.table == -1 &&
+						a_currentRow.volume == 0 && // volume == 0 means empty, -1 means 0, probably for compatibility with older modules
+						a_currentRow.effect.every(item => item === null)
+					) {
+						o_channelBuf.delayCount++; // empty row. increment delay Count
+					} else {
+						// has something sensical
+						if (i_currentChipID==CHIPID_NES && i_physicalChannelID==0) console.log(o_channelBuf.delayCount);
+						o_channelBuf.delayCount = 0;
+					}
 				}
 			});
 		}
 	}
+	
+	/* Bytecode commands format
+	- $00    : Note cut and terminate parsing
+	- $01    : Release and terminate parsing
+	- $02-$03: Reserved
+	- $04    : Parsing terminate
+	- $05-$07: Virtual channel flag (switch to virtual channel parsing until it terminates)
+	- $08-$6F: Notes (partial) starting from C-1 and terminate parsing
+	- $70-$7F: Volume change
+	- $80-$DF: Commands
+	- $E0-$FF: Default length
+	*/
 	
 	i_currentAddress = i_loadAddress; // only used to track label
 	a_byteObjList = [];
