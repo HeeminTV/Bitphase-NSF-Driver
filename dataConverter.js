@@ -103,14 +103,14 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 						a_currentRow.note.name == 0 &&
 						a_currentRow.note.octave == 0 &&
 						a_currentRow.instrument == 0 &&
-						a_currentRow.table == -1 &&
-						a_currentRow.volume == 0 && // volume == 0 means empty, -1 means 0, probably for compatibility with older modules
-						a_currentRow.effect.every(item => item === null)
+						a_currentRow.table == 0 &&
+						a_currentRow.volume == 0 &&
+						a_currentRow.effects.every(item => item === null)
 					) {
 						o_channelBuf.delayCount++; // empty row. increment delay Count
 					} else {
 						// has something sensical
-						if (i_currentChipID==CHIPID_NES && i_physicalChannelID==0) console.log(o_channelBuf.delayCount);
+						if (i_currentChipID==CHIPID_NES && i_physicalChannelID==0 && i_virtualChannelID == -1) console.log(o_channelBuf.delayCount);
 						o_channelBuf.delayCount = 0;
 					}
 				}
