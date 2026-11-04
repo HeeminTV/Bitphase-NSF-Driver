@@ -56,27 +56,32 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 	*/
 	
 	/* Bytecode stream commands format
-	- $00    : Note cut and terminate parsing
-	- $01    : Release and terminate parsing
-	- $02    : Jump
-	- $03    : Call
-	- $04-$07: Reserved
+	- $00    : Terminate parsing
+	- $01    : Note cut and terminate parsing
+	- $02    : Release and terminate parsing
+	- $03    : Jump
+	- $04    : Call
+	- $05-$07: *Reserved*
 	- $08    : Set default duration
 	- $09    : Set instrument
 	- $0A    : Set table
-    - $0B-$0C: Reserved
+    - $0B-$0C: *Reserved*
 	- $0D-$0F: Virtual channel flag (switch to virtual channel parsing mode until it terminates)
+
 	- $10-$1F: Volume column
 	- $20-$7F: Notes starting from C-1 and terminate parsing
+
 	- $80-$AF: Commands without parsing terminating
 	- $B0-$DF: Commands with parsing terminating
+
 	- $E0-$FF: Quick default duration
 	*/
 
-	const CMD_NOTECUT = 0x00;
-	const CMD_RELEASE = 0x01;
-	const CMD_JUMP = 0x02;				// xx xx, x = jump location
-	const CMD_CALL = 0x03; 				// xx yy yy, x = commands to read, y = call pointer
+	const CMD_TERMINATE = 0x00
+	const CMD_NOTECUT = 0x01;
+	const CMD_RELEASE = 0x02;
+	const CMD_JUMP = 0x03;				// xx xx, x = jump location
+	const CMD_CALL = 0x04; 				// xx yy yy, x = commands to read, y = call pointer
 	const CMD_SET_DURATION = 0x08; 		// xx = duration
 	const CMD_SET_INSTRUMENT = 0x09; 	// xx, x = instrument number
 	const CMD_SET_TABLE = 0x0A; 		// xx xx, x = table number
@@ -85,8 +90,8 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 	const CMD_VOLUME_COLUMN = 0x10;		// $10-$1F
 	const CMD_NOTE = 0x20				// $20-$7F
 
-	const CMD_EFF_SPEED = 0x88;
-	const CMD_EFF_TEMPO = 0x89;
+	const CMD_EFF_SPEED = 0x80;
+	const CMD_EFF_TEMPO = 0x81;
 	
 	const CMD_QUICK_SET_DURATION = 0xE0; // $E0-$FF
 
@@ -147,7 +152,7 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 						lastInstrument: -1,
 						
 
-						stream: [] // command buffer
+						stream: [] // command buffer (each commands seperated as array)
 					};
 					a_channelList.push(chBuf);
 				}
@@ -173,33 +178,52 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 							if (chBuf.delayCount >= 32) {
 								let delayDec = chBuf.delayCount-32;
 								while (delayDec > 255) {
-									chBuf.stream.push(CMD_SET_DURATION, 255);
+									chBuf.stream.push([CMD_SET_DURATION, 255]);
 									delayDec-=255;
 								}
-								chBuf.stream.push(CMD_SET_DURATION, delayDec);
+								chBuf.stream.push([CMD_SET_DURATION, delayDec]);
 
 							} else {
-								chBuf.stream.push(CMD_QUICK_SET_DURATION+chBuf.delayCount);
+								chBuf.stream.push([CMD_QUICK_SET_DURATION + chBuf.delayCount]);
 							}
 						}
 						chBuf.delayCount = 0;
 						
-						// note
+						// commands
+						let cmdBuffer = [];
+						// [
+						// [effect, param], [effect, param]
+						// ]
+						if (chRow.instrument != 0 && chRow.instrument != chBuf.lastInstrument) { // if instrument row isn't empty and it differs from the last instrument
+							chBuf.lastInstrument = chRow.instrument; // upadte last instrument
+							
+							cmdBuffer.push([CMD_SET_INSTRUMENT, chRow.instrument]);
+						}
+						
+						if (chRow.volume != 0) { // if volume column isn't empty
+							cmdBuffer.push([CMD_VOLUME_COLUMN + (chRow.volume == -1 ? 0 : chRow.volume)]);
+						}
+						
+						if (chRow.table != 0) { // if table column isn't empty
+							cmdBuffer.push([CMD_SET_TABLE], I
+						}
+						
+						// note (command terminating)
 						if (chRow.note.name == 1 && chRow.note.octave == 0) { // OFF
-							chBuf.stream.push(CMD_NOTECUT);
+							chBuf.stream.push([CMD_NOTECUT]);
 						} else if (chRow.note.name == 14 && chRow.note.octave == 0) { // release
-							chBuf.stream.push(CMD_RELEASE);
+							chBuf.stream.push([CMD_RELEASE]);
 						} else if (
 							chRow.note.name >= 2 && chRow.note.name <= 13 && 
 							chRow.note.octave >= 1 && chRow.note.octave <= 8
 						){ // valid note
-							chBuf.stream.push(
+							chBuf.stream.push([
 								(
 									(chRow.note.name-2) + ((chRow.note.octave-1)*12)
 								) + CMD_NOTE
-							);
+							]);
 						} else { // invalid / empty
-							chBuf.stream.push(CMD_TERMINATE);
+							() => {}; // chBuf.stream.push(CMD_TERMINATE);
 						}
 					}
 				}
