@@ -56,37 +56,38 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 	*/
 	
 	/* Bytecode stream commands format
-	- $00    : Parsing terminate
-	- $01    : Note cut and terminate parsing
-	- $02    : Release and terminate parsing
-	- $03-$04: Reserved
-	- $05-$07: Virtual channel flag (switch to virtual channel parsing until it terminates)
-	- $08-$7F: Notes starting from C-1 and terminate parsing
-	- $80-$CF: Commands
-	- $D0-$DF: Volume column
-	- $E0-$FF: Quick default length
+	- $00    : Note cut and terminate parsing
+	- $01    : Release and terminate parsing
+	- $02    : Jump
+	- $03    : Call
+	- $04-$07: Reserved
+	- $08    : Set default duration
+	- $09    : Set instrument
+	- $0A    : Set table
+    - $0B-$0C: Reserved
+	- $0D-$0F: Virtual channel flag (switch to virtual channel parsing mode until it terminates)
+	- $10-$1F: Volume column
+	- $20-$7F: Notes starting from C-1 and terminate parsing
+	- $80-$AF: Commands without parsing terminating
+	- $B0-$DF: Commands with parsing terminating
+	- $E0-$FF: Quick default duration
 	*/
-	
-	const CMD_TERMINATE = 0x00;
-	const CMD_NOTECUT = 0x01;
-	const CMD_RELEASE = 0x02;
-	// const CMD_ = 0x03; 				// reserved
-	// const CMD_ = 0x04; 				// reserved
-	const CMD_HANDLE_VCHAN = 0x05; 		// $05-$07
-	
-	const CMD_JUMP = 0x80;				// xx xx, x = jump location
-	const CMD_CALL = 0x81; 				// xx yy yy, x = commands to read, y = call pointer
-	const CMD_SET_INSTRUMENT = 0x82; 	// xx, x = instrument number
-	const CMD_SET_TABLE = 0x83; 		// xx xx, x = table number
-	const CMD_SET_DURATION = 0x84; 		// xx = duration
-	// const CMD_ = 0x85; 				// reserved
-	// const CMD_ = 0x86; 				// reserved
-	// const CMD_ = 0x87;				 // reserved
+
+	const CMD_NOTECUT = 0x00;
+	const CMD_RELEASE = 0x01;
+	const CMD_JUMP = 0x02;				// xx xx, x = jump location
+	const CMD_CALL = 0x03; 				// xx yy yy, x = commands to read, y = call pointer
+	const CMD_SET_DURATION = 0x08; 		// xx = duration
+	const CMD_SET_INSTRUMENT = 0x09; 	// xx, x = instrument number
+	const CMD_SET_TABLE = 0x0A; 		// xx xx, x = table number
+
+	const CMD_HANDLE_VCHAN = 0x0D; 		// $0D-$0F
+	const CMD_VOLUME_COLUMN = 0x10;		// $10-$1F
+	const CMD_NOTE = 0x20				// $20-$7F
 
 	const CMD_EFF_SPEED = 0x88;
 	const CMD_EFF_TEMPO = 0x89;
 	
-	const CMD_VOLUME_COLUMN = 0xD0;		 // $D0-$DF
 	const CMD_QUICK_SET_DURATION = 0xE0; // $E0-$FF
 
 	for (const chip of btpModule.songs) { // per chips
@@ -195,7 +196,7 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 							chBuf.stream.push(
 								(
 									(chRow.note.name-2) + ((chRow.note.octave-1)*12)
-								) + 8
+								) + CMD_NOTE
 							);
 						} else { // invalid / empty
 							chBuf.stream.push(CMD_TERMINATE);
