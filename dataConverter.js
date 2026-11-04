@@ -15,8 +15,6 @@
    ======================================================================================================
 */
 
-const fs = require('fs');
-
 // ======================================================================================================
 
 module.exports = { convertBitphaseJsonToNSFBytecode };
@@ -166,6 +164,8 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 						chBuf.delayCount++; // empty row. increment delay Count
 					} else {
 						// has something sensical
+						
+						// delay
 						if (chBuf.delayCount != chBuf.lastDelayCount) { // differnt duration
 							chBuf.lastDelayCount = chBuf.delayCount; // update last delay count
 
@@ -176,16 +176,30 @@ function convertBitphaseJsonToNSFBytecode(btpModule = [], i_loadAddress = 0xA000
 									delayDec-=255;
 								}
 								chBuf.stream.push(CMD_SET_DURATION, delayDec);
-								
-								chBuf.stream.push(CMD_SET_DURATION, chBuf.delayCount);
+
 							} else {
 								chBuf.stream.push(CMD_QUICK_SET_DURATION+chBuf.delayCount);
 							}
 						}
 						chBuf.delayCount = 0;
 						
-						// note 1 octave 0 = OFF
-						// note 14 octave 0 = REL?
+						// note
+						if (chRow.note.name == 1 && chRow.note.octave == 0) { // OFF
+							chBuf.stream.push(CMD_NOTECUT);
+						} else if (chRow.note.name == 14 && chRow.note.octave == 0) { // release
+							chBuf.stream.push(CMD_RELEASE);
+						} else if (
+							chRow.note.name >= 2 && chRow.note.name <= 13 && 
+							chRow.note.octave >= 1 && chRow.note.octave <= 8
+						){ // valid note
+							chBuf.stream.push(
+								(
+									(chRow.note.name-2) + ((chRow.note.octave-1)*12)
+								) + 8
+							);
+						} else { // invalid / empty
+							chBuf.stream.push(CMD_TERMINATE);
+						}
 					}
 				}
 			});
@@ -273,7 +287,7 @@ if (require.main === module) {
     }
 
     try {
-        fs.writeFileSync(args[2], convertBitphaseJsonToNSFBytecode(JSON.parse(require('zlib').gunzipSync(fs.readFileSync(args[0])).toString('utf8')), Number(args[1])));
+        require('fs').writeFileSync(args[2], convertBitphaseJsonToNSFBytecode(JSON.parse(require('zlib').gunzipSync(require('fs').readFileSync(args[0])).toString('utf8')), Number(args[1])));
         console.log(`Data output.`);
 		process.exit(0);
     } catch (err) {
